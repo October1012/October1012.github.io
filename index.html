@@ -55,11 +55,6 @@
             margin: 20px 0;
             line-height: 1.8;
         }
-        .score-item {
-            font-size: 20px;
-            margin: 15px 0;
-            color: #333;
-        }
         .admin-area {
             text-align: center;
             padding: 50px 0;
@@ -69,9 +64,16 @@
             margin: 10px 0;
             font-size: 16px;
         }
+        .success-tip {
+            color: #27ae60;
+            font-size: 18px;
+            margin: 15px 0;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
+    <!-- 信息填写区（学生/管理员通用） -->
     <div id="info-form">
         <h1>初中英语口语测试</h1>
         <div class="form-group">
@@ -98,25 +100,20 @@
         <p class="tip-text">提示：学生输入个人信息，管理员输入专属信息</p>
     </div>
 
+    <!-- 学生测试区 -->
     <div id="student-test-area" class="hidden">
         <h2>请朗读下面的英语课文</h2>
         <div id="text-content">
+            <!-- 替换成你的课文（纯英文，一行即可） -->
             My School Life My school is a beautiful place. I go to school from Monday to Friday. We have many subjects, like English, math and music. My favorite subject is English. Our English teacher is kind and helpful. After class, I often play games with my classmates. I love my school life very much.
         </div>
         <button onclick="startRecording()">开始录音</button>
         <button onclick="stopRecording()" disabled>停止录音</button>
         <p id="recording-status" style="color: #666; font-size: 18px; margin: 15px 0;"></p>
-        <button onclick="submitRecording()" class="hidden">提交录音，获取打分</button>
+        <button onclick="submitRecording()" class="hidden">提交录音</button>
     </div>
 
-    <div id="score-area" class="hidden">
-        <h2>口语打分结果</h2>
-        <div class="score-item">复杂度：<span id="complexity-score">--</span> 分（满分100）</div>
-        <div class="score-item">准确度：<span id="accuracy-score">--</span> 分（满分100）</div>
-        <div class="score-item">流利度：<span id="fluency-score">--</span> 分（满分100）</div>
-        <button onclick="restartTest()">返回重新测试</button>
-    </div>
-
+    <!-- 管理员区 -->
     <div id="admin-area" class="hidden admin-area">
         <h1>管理员模式 - 数据导出</h1>
         <p style="font-size: 18px; margin: 30px 0;">当前已存储 <span id="data-count">0</span> 名学生的测试数据</p>
@@ -137,11 +134,13 @@
             性别: "男"
         };
 
+        // 全局变量：存储所有学生数据（含成绩+录音，管理员可导出）
+        let allStudentData = [];
         let mediaRecorder;
         let audioChunks = [];
         let audioBlob = null;
-        let allStudentData = [];
 
+        // 1. 身份验证：区分学生/管理员
         function checkIdentity() {
             const inputId = document.getElementById("student-id").value.trim();
             const inputClass = document.getElementById("class").value.trim();
@@ -153,6 +152,7 @@
                 return;
             }
 
+            // 管理员验证：进入管理模式
             if (
                 inputId === ADMIN_CONFIG.学号 &&
                 inputClass === ADMIN_CONFIG.班级 &&
@@ -161,10 +161,13 @@
             ) {
                 document.getElementById("info-form").classList.add("hidden");
                 document.getElementById("admin-area").classList.remove("hidden");
+                // 同步显示已存储的学生数量
                 document.getElementById("data-count").textContent = allStudentData.length;
             } else {
+                // 学生验证：进入测试模式
                 document.getElementById("info-form").classList.add("hidden");
                 document.getElementById("student-test-area").classList.remove("hidden");
+                // 重置录音状态
                 document.getElementById("recording-status").textContent = "";
                 document.querySelector("button[onclick='startRecording()']").disabled = false;
                 document.querySelector("button[onclick='stopRecording()']").disabled = true;
@@ -174,59 +177,55 @@
             }
         }
 
+        // 2. 学生：开始录音
         async function startRecording() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                let supportedMimeType = '';
-                if (MediaRecorder.isTypeSupported('audio/webm; codecs=opus')) {
-                    supportedMimeType = 'audio/webm; codecs=opus';
-                } else {
-                    supportedMimeType = MediaRecorder.prototype.mimeType;
-                }
+                let supportedMimeType = MediaRecorder.isTypeSupported('audio/webm; codecs=opus') 
+                    ? 'audio/webm; codecs=opus' 
+                    : MediaRecorder.prototype.mimeType;
 
                 mediaRecorder = new MediaRecorder(stream, { mimeType: supportedMimeType });
                 audioChunks = [];
 
-                mediaRecorder.ondataavailable = (e) => {
-                    if (e.data.size > 0) {
-                        audioChunks.push(e.data);
-                    }
-                };
-
+                mediaRecorder.ondataavailable = (e) => e.data.size > 0 && audioChunks.push(e.data);
                 mediaRecorder.onstart = () => {
-                    document.getElementById("recording-status").textContent = "正在录音...请朗读课文";
+                    document.getElementById("recording-status").textContent = "正在录音...请朗读课文（读完点击停止）";
                 };
-
                 mediaRecorder.onstop = async () => {
                     if (audioChunks.length === 0) {
                         alert("录音失败，请重试！");
                         audioBlob = null;
                         return;
                     }
+                    // 转换录音为WAV格式（兼容腾讯云）
                     const tempBlob = new Blob(audioChunks, { type: supportedMimeType });
                     audioBlob = await convertToWav(tempBlob);
                 };
 
                 mediaRecorder.start();
+                // 禁用开始按钮，启用停止按钮
                 document.querySelector("button[onclick='startRecording()']").disabled = true;
                 document.querySelector("button[onclick='stopRecording()']").disabled = false;
-
             } catch (err) {
                 alert("录音启动失败！请允许浏览器使用麦克风");
             }
         }
 
+        // 3. 学生：停止录音
         function stopRecording() {
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
                 mediaRecorder.stop();
                 mediaRecorder.stream.getTracks().forEach(track => track.stop());
             }
-            document.getElementById("recording-status").textContent = "录音已停止，点击提交获取打分";
+            document.getElementById("recording-status").textContent = "录音已停止，点击提交完成测试";
+            // 启用提交按钮
+            document.querySelector("button[onclick='submitRecording()']").classList.remove("hidden");
             document.querySelector("button[onclick='startRecording()']").disabled = false;
             document.querySelector("button[onclick='stopRecording()']").disabled = true;
-            document.querySelector("button[onclick='submitRecording()']").classList.remove("hidden");
         }
 
+        // 4. 工具函数：录音转WAV格式
         async function convertToWav(inputBlob) {
             const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
             const arrayBuffer = await inputBlob.arrayBuffer();
@@ -242,6 +241,7 @@
             const wavBuffer = new ArrayBuffer(44 + resampledBuffer.length * 2);
             const view = new DataView(wavBuffer);
 
+            // 写入WAV文件头
             view.setUint32(0, 0x46464952, false);
             view.setUint32(4, 36 + resampledBuffer.length * 2, true);
             view.setUint32(8, 0x45564157, false);
@@ -256,6 +256,7 @@
             view.setUint32(36, 0x61746164, false);
             view.setUint32(40, resampledBuffer.length * 2, true);
 
+            // 写入音频数据
             const channelData = resampledBuffer.getChannelData(0);
             for (let i = 0; i < channelData.length; i++) {
                 const sample = Math.max(-1, Math.min(1, channelData[i]));
@@ -265,7 +266,7 @@
             return new Blob([view], { type: 'audio/wav' });
         }
 
-        // 腾讯云口语评测（无需复杂签名）
+        // 5. 学生：提交录音（核心逻辑：打分+保存数据+跳回信息页）
         async function submitRecording() {
             if (!audioBlob) {
                 alert("请先录音再提交！");
@@ -273,16 +274,16 @@
             }
 
             try {
-                // 转换录音为Base64
+                // 1. 转换录音为Base64格式
                 const reader = new FileReader();
                 reader.readAsDataURL(audioBlob);
                 await new Promise(resolve => reader.onload = resolve);
                 const audioBase64 = reader.result.split(',')[1];
 
-                // 获取课文文本
+                // 2. 获取课文文本
                 const text = document.getElementById("text-content").textContent.trim();
 
-                // 腾讯云接口请求（无需签名，直接用密钥）
+                // 3. 调用腾讯云口语评测接口
                 const url = `https://aai.tencentcloudapi.com/?Action=SentenceRecognition
 &ProjectId=0
 &SubServiceType=2
@@ -290,7 +291,7 @@
 &SourceType=1
 &Url=
 &VoiceFormat=wav
-&UsrAudioKey=test
+&UsrAudioKey=test_${Date.now()}
 &Text=${encodeURIComponent(text)}
 &SecretId=${TENCENT_SECRET_ID}
 &SecretKey=${TENCENT_SECRET_KEY}
@@ -303,57 +304,56 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ Data: audioBase64 })
                 });
-
                 const result = await response.json();
+
+                // 4. 打分成功：保存数据+提示+跳回信息页
                 if (result.Response && result.Response.Result) {
-                    const score = result.Response.Result.Score;
-                    const accuracy = Math.round(score.Accuracy * 100);
-                    const fluency = Math.round(score.Fluency * 100);
-                    const complexity = Math.round(score.Completeness * 100);
-
-                    document.getElementById("accuracy-score").textContent = accuracy;
-                    document.getElementById("fluency-score").textContent = fluency;
-                    document.getElementById("complexity-score").textContent = complexity;
-
-                    const studentData = {
+                    const scoreData = result.Response.Result;
+                    // 保存学生数据（含成绩+录音）
+                    allStudentData.push({
                         学号: document.getElementById("student-id").value.trim(),
                         班级: document.getElementById("class").value.trim(),
                         姓名: document.getElementById("name").value.trim(),
                         性别: document.getElementById("gender").value.trim(),
-                        复杂度分数: complexity,
-                        准确度分数: accuracy,
-                        流利度分数: fluency,
+                        复杂度分数: Math.round(scoreData.Completeness * 100),
+                        准确度分数: Math.round(scoreData.Accuracy * 100),
+                        流利度分数: Math.round(scoreData.Fluency * 100),
                         测试时间: new Date().toLocaleString(),
                         录音Blob: audioBlob
-                    };
-                    allStudentData.push(studentData);
+                    });
 
-                    document.getElementById("student-test-area").classList.add("hidden");
-                    document.getElementById("score-area").classList.remove("hidden");
+                    // 提示测试完毕，跳回信息输入界面
+                    alert("测试完毕！请等待老师通知成绩");
+                    restartTest();
                 } else {
-                    alert(`打分失败：${result.Response.Error.Message}`);
+                    // 打分失败：提示错误
+                    const errorMsg = result.Response?.Error?.Message || "测试失败，请重试";
+                    alert(errorMsg);
                 }
             } catch (err) {
-                alert("打分成功！请查看分数");
-                console.log(err);
+                alert("网络异常，测试失败，请检查网络后重试");
             }
         }
 
+        // 6. 学生：跳回信息输入界面（清空输入）
         function restartTest() {
-            document.getElementById("score-area").classList.add("hidden");
+            document.getElementById("student-test-area").classList.add("hidden");
             document.getElementById("info-form").classList.remove("hidden");
+            // 清空之前的输入内容
             document.getElementById("student-id").value = "";
             document.getElementById("class").value = "";
             document.getElementById("name").value = "";
             document.getElementById("gender").value = "";
         }
 
+        // 7. 管理员：导出Excel成绩表
         function exportToExcel() {
             if (allStudentData.length === 0) {
-                alert("暂无学生测试数据！");
+                alert("暂无学生测试数据，无法导出！");
                 return;
             }
 
+            // 整理Excel数据
             const excelData = allStudentData.map(item => ({
                 学号: item.学号,
                 班级: item.班级,
@@ -365,6 +365,7 @@
                 测试时间: item.测试时间
             }));
 
+            // 生成并下载Excel
             const workbook = XLSX.utils.book_new();
             const worksheet = XLSX.utils.json_to_sheet(excelData);
             XLSX.utils.book_append_sheet(workbook, worksheet, "学生口语成绩");
@@ -372,27 +373,31 @@
             XLSX.writeFile(workbook, `初中英语口语测试成绩_${today}.xlsx`);
         }
 
+        // 8. 管理员：导出所有学生录音（ZIP包）
         async function exportAllRecordings() {
             if (allStudentData.length === 0) {
-                alert("暂无学生测试数据！");
+                alert("暂无学生测试数据，无法导出！");
                 return;
             }
 
             const zip = new JSZip();
-            for (let i = 0; i < allStudentData.length; i++) {
-                const student = allStudentData[i];
+            // 逐个添加录音文件（命名：学号+姓名.wav）
+            allStudentData.forEach(student => {
                 const fileName = `${student.学号}_${student.姓名}.wav`;
                 zip.file(fileName, student.录音Blob);
-            }
+            });
 
+            // 生成并下载ZIP包
             const zipContent = await zip.generateAsync({ type: "blob" });
             const today = new Date().toLocaleDateString().replace(/\//g, "-");
             saveAs(zipContent, `学生口语测试录音_${today}.zip`);
         }
 
+        // 9. 管理员：退出管理模式
         function logoutAdmin() {
             document.getElementById("admin-area").classList.add("hidden");
             document.getElementById("info-form").classList.remove("hidden");
+            // 清空管理员输入
             document.getElementById("student-id").value = "";
             document.getElementById("class").value = "";
             document.getElementById("name").value = "";
@@ -401,4 +406,3 @@
     </script>
 </body>
 </html>
-
