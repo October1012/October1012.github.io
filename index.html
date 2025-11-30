@@ -51,7 +51,7 @@
                 </select>
             </div>
             <button onclick="checkIdentity()" style="width: 100%; background: #3498db;">进入系统</button>
-            <p class="tip-text">提示：学生输入个人信息</p>
+            <p class="tip-text">提示：请输入您的个人信息开始测试</p>
         </div>
 
         <!-- 学生测试区 -->
@@ -83,7 +83,7 @@
     </div>
 
     <script>
-        // 管理员身份
+        // 管理员身份（学生看不到这部分）
         const ADMIN_CONFIG = {
             学号: "admin001",
             班级: "管理员",
@@ -92,10 +92,39 @@
         };
 
         // 全局变量
-        let allStudentData = JSON.parse(localStorage.getItem('allStudentData') || '[]');
+        let allStudentData = [];
         let mediaRecorder;
         let audioChunks = [];
         let audioBlob = null;
+
+        // 数据存储函数
+        function loadAllStudentData() {
+            try {
+                const saved = localStorage.getItem('allStudentData');
+                if (saved) {
+                    allStudentData = JSON.parse(saved);
+                    console.log('加载到', allStudentData.length, '条数据');
+                }
+            } catch (e) {
+                console.log('加载数据失败:', e);
+                allStudentData = [];
+            }
+        }
+
+        function saveAllStudentData() {
+            try {
+                localStorage.setItem('allStudentData', JSON.stringify(allStudentData));
+                console.log('保存了', allStudentData.length, '条数据');
+            } catch (e) {
+                console.log('保存数据失败:', e);
+            }
+        }
+
+        function updateDataCount() {
+            const count = allStudentData.length;
+            document.getElementById("data-count").textContent = count;
+            console.log('当前数据数量:', count);
+        }
 
         // 1. 身份验证
         function checkIdentity() {
@@ -113,7 +142,7 @@
                 inputName === ADMIN_CONFIG.姓名 && inputGender === ADMIN_CONFIG.性别) {
                 document.getElementById("info-form").classList.add("hidden");
                 document.getElementById("admin-area").classList.remove("hidden");
-                document.getElementById("data-count").textContent = allStudentData.length;
+                updateDataCount(); // 确保显示最新数量
             } else {
                 // 学生验证
                 document.getElementById("info-form").classList.add("hidden");
@@ -181,7 +210,7 @@
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 
                 // 生成模拟分数（基于录音时长和随机数）
-                const duration = audioBlob.size / 1000; // 简单模拟时长
+                const duration = audioBlob.size / 1000;
                 const baseScore = Math.min(85, 60 + duration / 10);
                 const randomVariation = (Math.random() - 0.5) * 20;
                 const finalScore = Math.max(50, Math.min(100, baseScore + randomVariation));
@@ -199,7 +228,8 @@
                 };
                 
                 allStudentData.push(studentData);
-                localStorage.setItem('allStudentData', JSON.stringify(allStudentData));
+                saveAllStudentData(); // 使用统一的保存函数
+                updateDataCount(); // 立即更新显示
 
                 alert("测试已完成！成绩将由老师统一公布。");
                 restartTest();
@@ -253,8 +283,8 @@
         function clearAllData() {
             if (confirm("确定清空所有数据吗？")) {
                 allStudentData = [];
-                localStorage.removeItem('allStudentData');
-                document.getElementById("data-count").textContent = 0;
+                saveAllStudentData();
+                updateDataCount();
                 alert("数据已清空！");
             }
         }
@@ -268,10 +298,9 @@
             document.getElementById("gender").value = "";
         }
 
-        // 初始化
-        document.getElementById("data-count").textContent = allStudentData.length;
+        // 初始化 - 页面加载时执行
+        loadAllStudentData();
+        updateDataCount();
     </script>
 </body>
 </html>
-
-
