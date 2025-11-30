@@ -7,6 +7,8 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+    <!-- 添加 Supabase 客户端库 -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         body { font-family: 微软雅黑, Arial; max-width: 800px; margin: 0 auto; padding: 20px; background: #f5f5f5; }
         .container { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
@@ -23,6 +25,7 @@
         .recording { animation: pulse 1s infinite; background: #ff4444 !important; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.7; } 100% { opacity: 1; } }
         .score-display { background: #e8f5e8; padding: 15px; border-radius: 8px; margin: 15px 0; }
+        .loading { opacity: 0.6; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -75,15 +78,26 @@
             <div class="score-display">
                 <p style="font-size: 20px; margin: 0;">当前已存储 <span id="data-count" style="color: #e74c3c; font-weight: bold;">0</span> 名学生的测试数据</p>
             </div>
+            <button onclick="refreshData()" style="background: #4CAF50;">🔄 刷新数据</button>
             <button onclick="exportToExcel()" style="background: #2196F3;">📊 导出成绩（Excel）</button>
             <button onclick="exportAllRecordings()" style="background: #ff9800;">🎵 导出录音（ZIP包）</button>
             <button onclick="clearAllData()" style="background: #ff5722;">🗑️ 清空所有数据</button>
             <button onclick="logoutAdmin()" style="background: #f44336; margin-top: 20px;">退出管理员</button>
         </div>
+
+        <!-- 网络状态显示 -->
+        <div id="network-status" style="text-align: center; margin-top: 20px; font-size: 14px; color: #666;"></div>
     </div>
 
     <script>
-        // 管理员身份（学生看不到这部分）
+        // Supabase 云数据库配置
+        const SUPABASE_URL = 'https://lokppsuoecimireoypah.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_CcpqatN_uSSRqd4d1fde0w_vs2QkLcV';
+        
+        // 初始化 Supabase 客户端
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // 管理员身份
         const ADMIN_CONFIG = {
             学号: "admin001",
             班级: "管理员",
@@ -97,33 +111,146 @@
         let audioChunks = [];
         let audioBlob = null;
 
-        // 数据存储函数
-        function loadAllStudentData() {
+        // 云数据库函数
+        async function saveToCloud(studentData) {
             try {
-                const saved = localStorage.getItem('allStudentData');
-                if (saved) {
-                    allStudentData = JSON.parse(saved);
-                    console.log('加载到', allStudentData.length, '条数据');
-                }
-            } catch (e) {
-                console.log('加载数据失败:', e);
-                allStudentData = [];
+                // 转换录音为Base64
+                const audioBase64 = await blobToBase64(studentData.录音Blob);
+                
+                const { data, error } = await supabase
+                    .from('student_records')
+                    .insert([
+                        {
+                            学号: studentData.学号,
+                            班级: studentData.班级,
+                            姓名: studentData.姓名,
+                            性别: studentData.性别,
+                            准确度分数: studentData.准确度分数,
+                            流利度分数: studentData.流利度分数,
+                            完整度分数: studentData.完整度分数,
+                            测试时间: studentData.测试时间,
+                            录音数据: audioBase64
+                        }
+                    ]);
+                
+                if (error) throw error;
+                updateNetworkStatus('✅ 数据已保存到云端');
+                return true;
+            } catch (error) {
+                console.error('云存储失败:', error);
+                updateNetworkStatus('❌ 云存储失败，使用本地存储');
+                // 降级到本地存储
+                allStudentData.push(studentData);
+                localStorage.setItem('allStudentData', JSON.stringify(allStudentData));
+                return false;
             }
         }
 
-        function saveAllStudentData() {
+        async function loadFromCloud() {
             try {
-                localStorage.setItem('allStudentData', JSON.stringify(allStudentData));
-                console.log('保存了', allStudentData.length, '条数据');
-            } catch (e) {
-                console.log('保存数据失败:', e);
+                const { data, error } = await supabase
+                    .from('student_records')
+                    .select('*')
+                    .order('测试时间', { ascending: false });
+                
+                if (error) throw error;
+                
+                // 转换数据格式
+                allStudentData = data.map(item => {
+                    const audioBlob = base64ToBlob(item.录音数据, 'audio/wav');
+                    return {
+                        学号: item.学号,
+                        班级: item.班级,
+                        姓名: item.姓名,
+                        性别: item.性别,
+                        准确度分数: item.准确度分数,
+                        流利度分数: item.流利度分数,
+                        完整度分数: item.完整度分数,
+                        测试时间: item.测试时间,
+                        录音Blob: audioBlob
+                    };
+                });
+                
+                updateNetworkStatus('✅ 已从云端加载数据');
+                return true;
+            } catch (error) {
+                console.error('云加载失败:', error);
+                updateNetworkStatus('❌ 云加载失败，使用本地数据');
+                // 降级到本地存储
+                const localData = localStorage.getItem('allStudentData');
+                allStudentData = localData ? JSON.parse(localData) : [];
+                return false;
             }
+        }
+
+        async function clearCloudData() {
+            try {
+                const { error } = await supabase
+                    .from('student_records')
+                    .delete()
+                    .neq('学号', '永远不会删除的条件'); // 安全删除
+                
+                if (error) throw error;
+                return true;
+            } catch (error) {
+                console.error('清空云数据失败:', error);
+                return false;
+            }
+        }
+
+        // 工具函数
+        function blobToBase64(blob) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        function base64ToBlob(base64, mimeType) {
+            const byteCharacters = atob(base64);
+            const byteArrays = [];
+            for (let offset = 0; offset < byteCharacters.length; offset += 1024) {
+                const slice = byteCharacters.slice(offset, offset + 1024);
+                const byteNumbers = new Array(slice.length);
+                for (let i = 0; i < slice.length; i++) {
+                    byteNumbers[i] = slice.charCodeAt(i);
+                }
+                const byteArray = new Uint8Array(byteNumbers);
+                byteArrays.push(byteArray);
+            }
+            return new Blob(byteArrays, { type: mimeType });
+        }
+
+        function updateNetworkStatus(message) {
+            document.getElementById('network-status').textContent = message;
+            setTimeout(() => {
+                document.getElementById('network-status').textContent = '';
+            }, 3000);
         }
 
         function updateDataCount() {
             const count = allStudentData.length;
             document.getElementById("data-count").textContent = count;
-            console.log('当前数据数量:', count);
+        }
+
+        async function refreshData() {
+            setLoading(true, '刷新数据中...');
+            await loadFromCloud();
+            updateDataCount();
+            setLoading(false);
+            alert(`数据已刷新，当前共有 ${allStudentData.length} 条记录`);
+        }
+
+        function setLoading(isLoading, message = '') {
+            if (isLoading) {
+                document.body.classList.add('loading');
+                if (message) {
+                    updateNetworkStatus(message);
+                }
+            } else {
+                document.body.classList.remove('loading');
+            }
         }
 
         // 1. 身份验证
@@ -142,7 +269,7 @@
                 inputName === ADMIN_CONFIG.姓名 && inputGender === ADMIN_CONFIG.性别) {
                 document.getElementById("info-form").classList.add("hidden");
                 document.getElementById("admin-area").classList.remove("hidden");
-                updateDataCount(); // 确保显示最新数量
+                refreshData(); // 加载最新数据
             } else {
                 // 学生验证
                 document.getElementById("info-form").classList.add("hidden");
@@ -151,6 +278,7 @@
             }
         }
 
+        // [其余函数保持不变：resetRecordingState, startRecording, stopRecording]
         function resetRecordingState() {
             document.getElementById("recording-status").textContent = "";
             document.getElementById("start-btn").disabled = false;
@@ -161,7 +289,6 @@
             audioChunks = []; audioBlob = null;
         }
 
-        // 2. 开始录音
         async function startRecording() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -186,7 +313,6 @@
             }
         }
 
-        // 3. 停止录音
         function stopRecording() {
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
                 mediaRecorder.stop();
@@ -198,18 +324,19 @@
             document.getElementById("stop-btn").disabled = true;
         }
 
-        // 4. 提交录音（模拟评分）
+        // 4. 提交录音（保存到云端）
         async function submitRecording() {
             if (!audioBlob) { alert("请先录音！"); return; }
             
             try {
+                setLoading(true, '保存到云端...');
                 document.getElementById("submit-btn").disabled = true;
                 document.getElementById("submit-btn").textContent = "评测中...";
                 
                 // 模拟处理时间
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 
-                // 生成模拟分数（基于录音时长和随机数）
+                // 生成模拟分数
                 const duration = audioBlob.size / 1000;
                 const baseScore = Math.min(85, 60 + duration / 10);
                 const randomVariation = (Math.random() - 0.5) * 20;
@@ -227,15 +354,16 @@
                     录音Blob: audioBlob
                 };
                 
-                allStudentData.push(studentData);
-                saveAllStudentData(); // 使用统一的保存函数
-                updateDataCount(); // 立即更新显示
+                // 保存到云端
+                await saveToCloud(studentData);
+                updateDataCount();
 
                 alert("测试已完成！成绩将由老师统一公布。");
                 restartTest();
             } catch (err) {
-                alert("提交失败，请重试");
+                alert("提交失败，请重试: " + err.message);
             } finally {
+                setLoading(false);
                 document.getElementById("submit-btn").disabled = false;
                 document.getElementById("submit-btn").textContent = "提交录音";
             }
@@ -280,12 +408,20 @@
             }
         }
 
-        function clearAllData() {
-            if (confirm("确定清空所有数据吗？")) {
+        async function clearAllData() {
+            if (confirm("确定清空所有数据吗？此操作将删除所有学生的测试记录！")) {
+                setLoading(true, '清空数据中...');
+                const cloudSuccess = await clearCloudData();
                 allStudentData = [];
-                saveAllStudentData();
+                localStorage.removeItem('allStudentData');
                 updateDataCount();
-                alert("数据已清空！");
+                setLoading(false);
+                
+                if (cloudSuccess) {
+                    alert("云端和本地数据已清空！");
+                } else {
+                    alert("本地数据已清空，但云端清空失败！");
+                }
             }
         }
 
@@ -299,8 +435,10 @@
         }
 
         // 初始化 - 页面加载时执行
-        loadAllStudentData();
-        updateDataCount();
+        document.addEventListener('DOMContentLoaded', async function() {
+            await loadFromCloud();
+            updateDataCount();
+        });
     </script>
 </body>
 </html>
