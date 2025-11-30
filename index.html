@@ -389,8 +389,47 @@
             XLSX.utils.book_append_sheet(workbook, worksheet, "学生成绩");
             XLSX.writeFile(workbook, `口语测试成绩_${new Date().toLocaleDateString()}.xlsx`);
         }
+        // 6. 导出录音 - 标准命名
+        async function exportAllRecordings() {
+            if (allStudentData.length === 0) { 
+            alert("暂无学生测试数据，无法导出！"); 
+            return; 
+            }
 
-        // 6. 导出录音
+            try {
+                const zip = new JSZip();
+                let validRecordings = 0;
+        
+        // 逐个添加录音文件（标准命名：学号_姓名.wav）
+                allStudentData.forEach(student => {
+                    if (student.录音Blob && student.录音Blob.size > 0) {
+                        // 标准文件名格式：学号_姓名.wav
+                        const fileName = `${student.学号}_${student.姓名}.wav`;
+                        zip.file(fileName, student.录音Blob);
+                        validRecordings++;
+                        console.log(`✅ 添加: ${fileName}`);
+                    } else {
+                        console.log(`❌ 跳过: ${student.学号}_${student.姓名} (无录音数据)`);
+                    }
+                });
+
+                if (validRecordings === 0) {
+                    alert("没有找到有效的录音文件！请确保学生已完成录音测试。");
+                    return;
+                }
+
+                // 生成并下载ZIP包
+                const zipContent = await zip.generateAsync({ type: "blob" });
+                const today = new Date().toLocaleDateString().replace(/\//g, "-");
+                saveAs(zipContent, `初中英语口语测试录音_${today}.zip`);
+        
+                alert(`🎉 导出成功！\n共导出 ${validRecordings} 个录音文件\n文件名：学号_姓名.wav`);
+        
+            } catch (err) {
+                console.error('导出录音失败:', err);
+                alert('导出录音文件失败，请重试：' + err.message);
+            }
+        }
         async function exportAllRecordings() {
             if (allStudentData.length === 0) { alert("暂无数据！"); return; }
             try {
@@ -442,3 +481,4 @@
     </script>
 </body>
 </html>
+
