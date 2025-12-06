@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>初中英语口语测试</title>
+    <title>英语口语测试</title>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
@@ -32,7 +32,7 @@
     <div class="container">
         <!-- 信息填写区 -->
         <div id="info-form">
-            <h1 style="text-align: center; color: #2c3e50;">初中英语口语测试</h1>
+            <h1 style="text-align: center; color: #2c3e50;">英语口语测试</h1>
             <div class="form-group">
                 <label for="student-id">学号</label>
                 <input type="text" id="student-id" placeholder="请输入学号（如25号）" required>
@@ -595,7 +595,7 @@
             XLSX.writeFile(workbook, `初中英语口语测试成绩_${today}.xlsx`);
         }
 
-        // 6. 导出录音 - 标准命名（学号_姓名.wav）
+        // 6. 导出录音 - 标准命名（班级_姓名.wav）
         async function exportAllRecordings() {
             if (allStudentData.length === 0) { 
                 alert("暂无学生测试数据，无法导出！"); 
@@ -608,16 +608,16 @@
                 const zip = new JSZip();
                 let validRecordings = 0;
         
-                // 逐个添加录音文件（标准命名：学号_姓名.wav）
+                // 逐个添加录音文件（标准命名：班级_姓名.wav）
                 allStudentData.forEach((student, index) => {
                     if (student.录音Blob && student.录音Blob.size > 100) { // 确保不是空文件
-                        // 标准文件名格式：学号_姓名.wav
-                        const fileName = `${student.学号}_${student.姓名}.wav`;
+                        // 标准文件名格式：班级_姓名.wav
+                        const fileName = `${student.班级}_${student.姓名}.wav`;
                         zip.file(fileName, student.录音Blob);
                         validRecordings++;
                         console.log(`✅ 添加录音: ${fileName}`);
                     } else {
-                        console.log(`❌ 跳过: ${student.学号}_${student.姓名} (无录音数据)`);
+                        console.log(`❌ 跳过: ${student.班级}_${student.姓名} (无录音数据)`);
                     }
                 });
 
@@ -630,10 +630,10 @@
                 // 生成并下载ZIP包
                 const zipContent = await zip.generateAsync({ type: "blob" });
                 const today = new Date().toLocaleDateString().replace(/\//g, "-");
-                saveAs(zipContent, `初中英语口语测试录音_${today}.zip`);
+                saveAs(zipContent, `英语口语测试录音_${today}.zip`);
                 
                 setLoading(false);
-                alert(`🎉 导出成功！\n共导出 ${validRecordings} 个录音文件\n文件名：学号_姓名.wav`);
+                alert(`🎉 导出成功！\n共导出 ${validRecordings} 个录音文件\n文件名：班级_姓名.wav`);
         
             } catch (err) {
                 setLoading(false);
@@ -721,4 +721,5 @@
     </script>
 </body>
 </html>
+
 
