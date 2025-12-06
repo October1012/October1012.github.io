@@ -90,12 +90,25 @@
     </div>
 
     <script>
-        // Supabase 云数据库配置
-        const SUPABASE_URL = 'https://lokppsuoecimireoypah.supabase.co';
-        const SUPABASE_KEY = 'sb_publishable_CcpqatN_uSSRqd4d1fde0w_vs2QkLcV';
+        // ================== 重要配置 ==================
+        // 设置：true=使用云存储，false=仅本地存储（如果云存储有问题）
+        const USE_CLOUD_STORAGE = true;
         
-        // 初始化 Supabase 客户端
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        // Supabase 云数据库配置（请替换为您的实际密钥）
+        const SUPABASE_URL = 'https://lokppsuoecimireoypah.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxva3Bwc3VvZWNpbWlyZW95cGFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ0OTM5NzUsImV4cCI6MjA4MDA2OTk3NX0.UHL4-QI1pjEcA5bKn0nzNvuseI73oIHa3ubDe5E4d7E'; // 以eyJ开头的长字符串
+        
+        // 初始化 Supabase 客户端（仅在使用云存储时）
+        let supabase = null;
+        if (USE_CLOUD_STORAGE) {
+            try {
+                supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                console.log('✅ Supabase 客户端初始化成功');
+            } catch (error) {
+                console.error('❌ Supabase 初始化失败:', error);
+                alert('云存储初始化失败，将使用本地存储');
+            }
+        }
 
         // 管理员身份
         const ADMIN_CONFIG = {
@@ -111,11 +124,54 @@
         let audioChunks = [];
         let audioBlob = null;
 
-        // 云数据库函数
-        async function saveToCloud(studentData) {
+        // ================== 数据库函数 ==================
+        
+        // 测试数据库连接
+        async function testDatabaseConnection() {
+            if (!USE_CLOUD_STORAGE || !supabase) {
+                console.log('使用本地存储模式');
+                return false;
+            }
+            
             try {
+                console.log('测试数据库连接...');
+                const { data, error } = await supabase
+                    .from('student_records')
+                    .select('id')
+                    .limit(1);
+                
+                if (error) {
+                    console.error('数据库连接错误:', error);
+                    return false;
+                }
+                
+                console.log('✅ 数据库连接成功');
+                return true;
+            } catch (error) {
+                console.error('数据库连接失败:', error);
+                return false;
+            }
+        }
+
+        // 保存数据到云端
+        async function saveToCloud(studentData) {
+            if (!USE_CLOUD_STORAGE || !supabase) {
+                console.log('云存储未启用，仅保存到本地');
+                return false;
+            }
+            
+            try {
+                console.log('开始保存数据到云端...');
+                
+                // 测试连接
+                const connected = await testDatabaseConnection();
+                if (!connected) {
+                    throw new Error('无法连接到数据库');
+                }
+                
                 // 转换录音为Base64
                 const audioBase64 = await blobToBase64(studentData.录音Blob);
+                console.log('音频数据大小:', audioBase64.length, '字节');
                 
                 const { data, error } = await supabase
                     .from('student_records')
@@ -133,62 +189,129 @@
                         }
                     ]);
                 
-                if (error) throw error;
+                if (error) {
+                    console.error('Supabase插入错误:', error);
+                    throw error;
+                }
+                
+                console.log('✅ 云端保存成功，ID:', data[0]?.id);
                 updateNetworkStatus('✅ 数据已保存到云端');
                 return true;
+                
             } catch (error) {
                 console.error('云存储失败:', error);
                 updateNetworkStatus('❌ 云存储失败，使用本地存储');
-                // 降级到本地存储
-                allStudentData.push(studentData);
-                localStorage.setItem('allStudentData', JSON.stringify(allStudentData));
                 return false;
             }
         }
 
+        // 从云端加载数据
         async function loadFromCloud() {
+            if (!USE_CLOUD_STORAGE || !supabase) {
+                console.log('云存储未启用，从本地加载');
+                loadFromLocal();
+                return false;
+            }
+            
             try {
+                console.log('从云端加载数据...');
+                
+                const connected = await testDatabaseConnection();
+                if (!connected) {
+                    throw new Error('无法连接到数据库');
+                }
+                
                 const { data, error } = await supabase
                     .from('student_records')
                     .select('*')
-                    .order('测试时间', { ascending: false });
+                    .order('created_at', { ascending: false });
                 
                 if (error) throw error;
                 
+                console.log('从云端加载到', data.length, '条记录');
+                
                 // 转换数据格式
-                allStudentData = data.map(item => {
-                    const audioBlob = base64ToBlob(item.录音数据, 'audio/wav');
-                    return {
-                        学号: item.学号,
-                        班级: item.班级,
-                        姓名: item.姓名,
-                        性别: item.性别,
-                        准确度分数: item.准确度分数,
-                        流利度分数: item.流利度分数,
-                        完整度分数: item.完整度分数,
-                        测试时间: item.测试时间,
-                        录音Blob: audioBlob
-                    };
+                allStudentData = [];
+                data.forEach(item => {
+                    try {
+                        const audioBlob = base64ToBlob(item.录音数据, 'audio/wav');
+                        allStudentData.push({
+                            学号: item.学号,
+                            班级: item.班级,
+                            姓名: item.姓名,
+                            性别: item.性别,
+                            准确度分数: item.准确度分数,
+                            流利度分数: item.流利度分数,
+                            完整度分数: item.完整度分数,
+                            测试时间: item.测试时间,
+                            录音Blob: audioBlob
+                        });
+                    } catch (e) {
+                        console.warn('转换录音数据失败，保存基本信息:', e);
+                        allStudentData.push({
+                            学号: item.学号,
+                            班级: item.班级,
+                            姓名: item.姓名,
+                            性别: item.性别,
+                            准确度分数: item.准确度分数,
+                            流利度分数: item.流利度分数,
+                            完整度分数: item.完整度分数,
+                            测试时间: item.测试时间,
+                            录音Blob: null
+                        });
+                    }
                 });
                 
-                updateNetworkStatus('✅ 已从云端加载数据');
+                // 同时保存到本地作为备份
+                localStorage.setItem('allStudentData', JSON.stringify(allStudentData.map(item => {
+                    const { 录音Blob, ...dataWithoutBlob } = item;
+                    return dataWithoutBlob;
+                })));
+                
+                updateNetworkStatus('✅ 已从云端加载 ' + allStudentData.length + ' 条数据');
                 return true;
+                
             } catch (error) {
                 console.error('云加载失败:', error);
                 updateNetworkStatus('❌ 云加载失败，使用本地数据');
-                // 降级到本地存储
-                const localData = localStorage.getItem('allStudentData');
-                allStudentData = localData ? JSON.parse(localData) : [];
+                loadFromLocal();
                 return false;
             }
         }
 
+        // 从本地加载数据
+        function loadFromLocal() {
+            try {
+                const localData = localStorage.getItem('allStudentData');
+                if (localData) {
+                    const parsedData = JSON.parse(localData);
+                    allStudentData = parsedData.map(item => ({
+                        ...item,
+                        录音Blob: null // 本地存储不包含录音文件
+                    }));
+                    console.log('从本地加载到', allStudentData.length, '条记录');
+                } else {
+                    allStudentData = [];
+                    console.log('本地无数据');
+                }
+            } catch (e) {
+                console.error('本地加载失败:', e);
+                allStudentData = [];
+            }
+        }
+
+        // 清空云数据
         async function clearCloudData() {
+            if (!USE_CLOUD_STORAGE || !supabase) {
+                console.log('云存储未启用，仅清空本地数据');
+                return true;
+            }
+            
             try {
                 const { error } = await supabase
                     .from('student_records')
                     .delete()
-                    .neq('学号', '永远不会删除的条件'); // 安全删除
+                    .neq('id', 0); // 删除所有记录
                 
                 if (error) throw error;
                 return true;
@@ -198,48 +321,70 @@
             }
         }
 
-        // 工具函数
+        // ================== 工具函数 ==================
+        
         function blobToBase64(blob) {
             return new Promise((resolve) => {
                 const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                reader.onloadend = () => {
+                    const result = reader.result;
+                    const base64 = result.split(',')[1];
+                    resolve(base64);
+                };
                 reader.readAsDataURL(blob);
             });
         }
 
         function base64ToBlob(base64, mimeType) {
-            const byteCharacters = atob(base64);
-            const byteArrays = [];
-            for (let offset = 0; offset < byteCharacters.length; offset += 1024) {
-                const slice = byteCharacters.slice(offset, offset + 1024);
-                const byteNumbers = new Array(slice.length);
-                for (let i = 0; i < slice.length; i++) {
-                    byteNumbers[i] = slice.charCodeAt(i);
+            try {
+                const byteCharacters = atob(base64);
+                const byteArrays = [];
+                for (let offset = 0; offset < byteCharacters.length; offset += 1024) {
+                    const slice = byteCharacters.slice(offset, offset + 1024);
+                    const byteNumbers = new Array(slice.length);
+                    for (let i = 0; i < slice.length; i++) {
+                        byteNumbers[i] = slice.charCodeAt(i);
+                    }
+                    const byteArray = new Uint8Array(byteNumbers);
+                    byteArrays.push(byteArray);
                 }
-                const byteArray = new Uint8Array(byteNumbers);
-                byteArrays.push(byteArray);
+                return new Blob(byteArrays, { type: mimeType });
+            } catch (error) {
+                console.error('Base64转Blob失败:', error);
+                return new Blob([], { type: mimeType });
             }
-            return new Blob(byteArrays, { type: mimeType });
         }
 
         function updateNetworkStatus(message) {
-            document.getElementById('network-status').textContent = message;
-            setTimeout(() => {
-                document.getElementById('network-status').textContent = '';
-            }, 3000);
+            const statusDiv = document.getElementById('network-status');
+            if (statusDiv) {
+                statusDiv.textContent = message;
+                statusDiv.style.color = message.includes('✅') ? 'green' : 'red';
+                setTimeout(() => {
+                    statusDiv.textContent = '';
+                }, 5000);
+            }
         }
 
         function updateDataCount() {
             const count = allStudentData.length;
-            document.getElementById("data-count").textContent = count;
+            const countElement = document.getElementById("data-count");
+            if (countElement) {
+                countElement.textContent = count;
+            }
         }
 
         async function refreshData() {
-            setLoading(true, '刷新数据中...');
-            await loadFromCloud();
-            updateDataCount();
-            setLoading(false);
-            alert(`数据已刷新，当前共有 ${allStudentData.length} 条记录`);
+            try {
+                setLoading(true, '刷新数据中...');
+                await loadFromCloud();
+                updateDataCount();
+                setLoading(false);
+                alert(`数据已刷新，当前共有 ${allStudentData.length} 条记录`);
+            } catch (error) {
+                setLoading(false);
+                alert('刷新数据失败: ' + error.message);
+            }
         }
 
         function setLoading(isLoading, message = '') {
@@ -253,6 +398,8 @@
             }
         }
 
+        // ================== 主要功能函数 ==================
+        
         // 1. 身份验证
         function checkIdentity() {
             const inputId = document.getElementById("student-id").value.trim();
@@ -261,7 +408,8 @@
             const inputGender = document.getElementById("gender").value.trim();
 
             if (!inputId || !inputClass || !inputName || !inputGender) {
-                alert("请填写完整信息！"); return;
+                alert("请填写完整信息！"); 
+                return;
             }
 
             // 管理员验证
@@ -269,7 +417,7 @@
                 inputName === ADMIN_CONFIG.姓名 && inputGender === ADMIN_CONFIG.性别) {
                 document.getElementById("info-form").classList.add("hidden");
                 document.getElementById("admin-area").classList.remove("hidden");
-                refreshData(); // 加载最新数据
+                updateDataCount();
             } else {
                 // 学生验证
                 document.getElementById("info-form").classList.add("hidden");
@@ -278,7 +426,6 @@
             }
         }
 
-        // [其余函数保持不变：resetRecordingState, startRecording, stopRecording]
         function resetRecordingState() {
             document.getElementById("recording-status").textContent = "";
             document.getElementById("start-btn").disabled = false;
@@ -286,37 +433,61 @@
             document.getElementById("submit-btn").classList.add("hidden");
             document.getElementById("submit-btn").disabled = true;
             document.getElementById("start-btn").classList.remove("recording");
-            audioChunks = []; audioBlob = null;
+            audioChunks = []; 
+            audioBlob = null;
         }
 
+        // 2. 开始录音
         async function startRecording() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        sampleRate: 16000,
+                        channelCount: 1,
+                        echoCancellation: true
+                    } 
+                });
+                
                 mediaRecorder = new MediaRecorder(stream);
                 audioChunks = [];
-                mediaRecorder.ondataavailable = (e) => e.data.size > 0 && audioChunks.push(e.data);
+                
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) {
+                        audioChunks.push(e.data);
+                    }
+                };
+                
                 mediaRecorder.onstart = () => {
                     document.getElementById("recording-status").textContent = "🎤 正在录音...请清晰朗读课文";
                     document.getElementById("recording-status").style.background = "#ffeaa7";
                     document.getElementById("start-btn").classList.add("recording");
                 };
+                
                 mediaRecorder.onstop = () => {
                     audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
                     document.getElementById("recording-status").textContent = "✅ 录音完成！点击提交";
                     document.getElementById("recording-status").style.background = "#55efc4";
+                    document.getElementById("start-btn").classList.remove("recording");
+                    console.log('录音完成，文件大小:', audioBlob.size, '字节');
                 };
-                mediaRecorder.start();
+                
+                mediaRecorder.start(1000); // 每1秒收集一次数据
                 document.getElementById("start-btn").disabled = true;
                 document.getElementById("stop-btn").disabled = false;
+                
             } catch (err) {
+                console.error('录音启动失败:', err);
                 alert("请允许浏览器使用麦克风！");
             }
         }
 
+        // 3. 停止录音
         function stopRecording() {
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
                 mediaRecorder.stop();
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                if (mediaRecorder.stream) {
+                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                }
             }
             document.getElementById("submit-btn").classList.remove("hidden");
             document.getElementById("submit-btn").disabled = false;
@@ -324,22 +495,25 @@
             document.getElementById("stop-btn").disabled = true;
         }
 
-        // 4. 提交录音（保存到云端）
+        // 4. 提交录音
         async function submitRecording() {
-            if (!audioBlob) { alert("请先录音！"); return; }
+            if (!audioBlob) { 
+                alert("请先录音再提交！"); 
+                return; 
+            }
             
             try {
-                setLoading(true, '保存到云端...');
+                setLoading(true, '处理中...');
                 document.getElementById("submit-btn").disabled = true;
                 document.getElementById("submit-btn").textContent = "评测中...";
                 
                 // 模拟处理时间
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                await new Promise(resolve => setTimeout(resolve, 1500));
                 
                 // 生成模拟分数
-                const duration = audioBlob.size / 1000;
-                const baseScore = Math.min(85, 60 + duration / 10);
-                const randomVariation = (Math.random() - 0.5) * 20;
+                const duration = Math.max(1, audioBlob.size / 5000); // 模拟时长
+                const baseScore = Math.min(85, 60 + duration);
+                const randomVariation = (Math.random() - 0.5) * 15;
                 const finalScore = Math.max(50, Math.min(100, baseScore + randomVariation));
                 
                 const studentData = {
@@ -354,13 +528,36 @@
                     录音Blob: audioBlob
                 };
                 
-                // 保存到云端
-                await saveToCloud(studentData);
+                console.log('学生数据准备完成:', studentData.学号, studentData.姓名);
+                
+                // 保存数据（云端+本地双备份）
+                let cloudSuccess = false;
+                if (USE_CLOUD_STORAGE && supabase) {
+                    cloudSuccess = await saveToCloud(studentData);
+                }
+                
+                // 无论云端是否成功，都保存到本地
+                allStudentData.push(studentData);
+                
+                // 保存基本信息到本地存储（不含录音文件）
+                const localData = allStudentData.map(item => {
+                    const { 录音Blob, ...dataWithoutBlob } = item;
+                    return dataWithoutBlob;
+                });
+                localStorage.setItem('allStudentData', JSON.stringify(localData));
+                
                 updateDataCount();
-
-                alert("测试已完成！成绩将由老师统一公布。");
+                
+                if (cloudSuccess) {
+                    alert("✅ 测试已完成！数据已保存到云端。\n成绩将由老师统一公布。");
+                } else {
+                    alert("✅ 测试已完成！数据已保存到本地。\n成绩将由老师统一公布。");
+                }
+                
                 restartTest();
+                
             } catch (err) {
+                console.error('提交失败:', err);
                 alert("提交失败，请重试: " + err.message);
             } finally {
                 setLoading(false);
@@ -380,41 +577,53 @@
 
         // 5. 导出Excel
         function exportToExcel() {
-            if (allStudentData.length === 0) { alert("暂无数据！"); return; }
+            if (allStudentData.length === 0) { 
+                alert("暂无数据可导出！"); 
+                return; 
+            }
+            
             const excelData = allStudentData.map(item => {
-                const { 录音Blob, ...data } = item; return data;
+                const { 录音Blob, ...data } = item;
+                return data;
             });
+            
             const workbook = XLSX.utils.book_new();
             const worksheet = XLSX.utils.json_to_sheet(excelData);
             XLSX.utils.book_append_sheet(workbook, worksheet, "学生成绩");
-            XLSX.writeFile(workbook, `口语测试成绩_${new Date().toLocaleDateString()}.xlsx`);
+            
+            const today = new Date().toLocaleDateString().replace(/\//g, "-");
+            XLSX.writeFile(workbook, `初中英语口语测试成绩_${today}.xlsx`);
         }
-        // 6. 导出录音 - 标准命名
+
+        // 6. 导出录音 - 标准命名（学号_姓名.wav）
         async function exportAllRecordings() {
             if (allStudentData.length === 0) { 
-            alert("暂无学生测试数据，无法导出！"); 
-            return; 
+                alert("暂无学生测试数据，无法导出！"); 
+                return; 
             }
 
             try {
+                setLoading(true, '准备录音文件...');
+                
                 const zip = new JSZip();
                 let validRecordings = 0;
         
-        // 逐个添加录音文件（标准命名：学号_姓名.wav）
-                allStudentData.forEach(student => {
-                    if (student.录音Blob && student.录音Blob.size > 0) {
+                // 逐个添加录音文件（标准命名：学号_姓名.wav）
+                allStudentData.forEach((student, index) => {
+                    if (student.录音Blob && student.录音Blob.size > 100) { // 确保不是空文件
                         // 标准文件名格式：学号_姓名.wav
                         const fileName = `${student.学号}_${student.姓名}.wav`;
                         zip.file(fileName, student.录音Blob);
                         validRecordings++;
-                        console.log(`✅ 添加: ${fileName}`);
+                        console.log(`✅ 添加录音: ${fileName}`);
                     } else {
                         console.log(`❌ 跳过: ${student.学号}_${student.姓名} (无录音数据)`);
                     }
                 });
 
                 if (validRecordings === 0) {
-                    alert("没有找到有效的录音文件！请确保学生已完成录音测试。");
+                    setLoading(false);
+                    alert("没有找到有效的录音文件！\n请确保学生已完成录音测试。");
                     return;
                 }
 
@@ -422,48 +631,53 @@
                 const zipContent = await zip.generateAsync({ type: "blob" });
                 const today = new Date().toLocaleDateString().replace(/\//g, "-");
                 saveAs(zipContent, `初中英语口语测试录音_${today}.zip`);
-        
+                
+                setLoading(false);
                 alert(`🎉 导出成功！\n共导出 ${validRecordings} 个录音文件\n文件名：学号_姓名.wav`);
         
             } catch (err) {
+                setLoading(false);
                 console.error('导出录音失败:', err);
                 alert('导出录音文件失败，请重试：' + err.message);
             }
         }
-        async function exportAllRecordings() {
-            if (allStudentData.length === 0) { alert("暂无数据！"); return; }
-            try {
-                const zip = new JSZip();
-                allStudentData.forEach(student => {
-                    if (student.录音Blob) {
-                        zip.file(`${student.学号}_${student.姓名}.wav`, student.录音Blob);
-                    }
-                });
-                const zipContent = await zip.generateAsync({ type: "blob" });
-                saveAs(zipContent, `学生录音_${new Date().toLocaleDateString()}.zip`);
-                alert(`成功导出 ${allStudentData.length} 个录音文件！`);
-            } catch (err) {
-                alert('导出失败');
-            }
-        }
 
+        // 7. 清空所有数据
         async function clearAllData() {
-            if (confirm("确定清空所有数据吗？此操作将删除所有学生的测试记录！")) {
+            if (!confirm("⚠️  确定要清空所有数据吗？\n此操作将删除所有学生的测试记录！")) {
+                return;
+            }
+            
+            try {
                 setLoading(true, '清空数据中...');
-                const cloudSuccess = await clearCloudData();
+                
+                let cloudSuccess = false;
+                if (USE_CLOUD_STORAGE && supabase) {
+                    cloudSuccess = await clearCloudData();
+                }
+                
+                // 清空本地数据
                 allStudentData = [];
                 localStorage.removeItem('allStudentData');
                 updateDataCount();
+                
                 setLoading(false);
                 
                 if (cloudSuccess) {
-                    alert("云端和本地数据已清空！");
+                    alert("✅ 云端和本地数据已清空！");
+                } else if (USE_CLOUD_STORAGE) {
+                    alert("✅ 本地数据已清空！\n⚠️  云端清空失败，请稍后重试。");
                 } else {
-                    alert("本地数据已清空，但云端清空失败！");
+                    alert("✅ 本地数据已清空！");
                 }
+                
+            } catch (error) {
+                setLoading(false);
+                alert('清空数据失败: ' + error.message);
             }
         }
 
+        // 8. 退出管理员
         function logoutAdmin() {
             document.getElementById("admin-area").classList.add("hidden");
             document.getElementById("info-form").classList.remove("hidden");
@@ -473,12 +687,37 @@
             document.getElementById("gender").value = "";
         }
 
-        // 初始化 - 页面加载时执行
+        // ================== 初始化 ==================
         document.addEventListener('DOMContentLoaded', async function() {
+            console.log('页面加载完成，初始化中...');
+            
+            // 显示当前存储模式
+            if (USE_CLOUD_STORAGE) {
+                console.log('使用云存储模式');
+                updateNetworkStatus('🌐 云存储模式已启用');
+            } else {
+                console.log('使用本地存储模式');
+                updateNetworkStatus('💻 本地存储模式');
+            }
+            
+            // 加载数据
             await loadFromCloud();
             updateDataCount();
+            
+            // 测试数据库连接（仅云存储模式）
+            if (USE_CLOUD_STORAGE && supabase) {
+                setTimeout(async () => {
+                    const connected = await testDatabaseConnection();
+                    if (connected) {
+                        updateNetworkStatus('✅ 云端连接正常');
+                    } else {
+                        updateNetworkStatus('⚠️  云端连接失败，使用本地存储');
+                    }
+                }, 1000);
+            }
+            
+            console.log('初始化完成，当前数据:', allStudentData.length, '条');
         });
     </script>
 </body>
 </html>
-
